@@ -4,7 +4,6 @@ from discord.ui import View, Button
 from discord import app_commands
 from datetime import datetime, timedelta
 from pytz import timezone
-from dotenv import load_dotenv
 from db import (
     save_attendance, get_attendance, add_exp, remove_exp, get_exp,
     save_wakeup, log_study_time, get_today_study_time,
@@ -15,7 +14,6 @@ from db import (
 import random
 import os
 
-load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()

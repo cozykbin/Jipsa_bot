@@ -14,8 +14,12 @@ from db import (
 import random
 import os
 import requests
+import aiohttp
+import asyncio
+import logging
 
 TOKEN = os.getenv("DISCORD_TOKEN")
+GSHEET_WEBHOOK = os.getenv("GSHEET_WEBHOOK")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -24,34 +28,31 @@ intents.messages = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+logger = logging.getLogger(__name__)
 
-# Google Apps Script 웹앱 URL (환경변수로부터)
-GSHEET_WEBHOOK = os.getenv("GSHEET_WEBHOOK")
-
-def append_to_sheet(sheet_name: str, row_data: list) -> bool:
-    """
-    Apps Script 웹훅에 POST 요청을 보내서,
-    sheet_name 탭에 row_data 행을 추가합니다.
-    """
+async def append_to_sheet(session: aiohttp.ClientSession, sheet_name: str, data: list) -> bool:
     if not GSHEET_WEBHOOK:
+        logger.error("Google Sheet Webhook URL이 설정되어 있지 않습니다.")
         return False
+
     payload = {
         "sheet": sheet_name,
-        "data": row_data
+        "data": data
     }
+
     try:
-        resp = requests.post(GSHEET_WEBHOOK, json=payload, timeout=5)
-        return resp.ok
-    except Exception:
+        async with session.post(GSHEET_WEBHOOK, json=payload, timeout=5) as resp:
+            if resp.status != 200:
+                logger.warning(f"Google Sheet API 비정상 응답: 상태코드 {resp.status}")
+                return False
+            return True
+    except Exception as e:
+        logger.error(f"Google Sheet API 요청 실패: {str(e)}")
         return False
+
 
 # ==== 임베드 푸터 생성 함수 ====
 def get_embed_footer(user: discord.User, dt: datetime):
-    """
-    모든 임베드 하단에 들어갈 '프로필사진 | 닉네임 | 날짜, 시간' 구조를
-    작은 글씨로 보여주기 위한 헬퍼 함수.
-    - dt: datetime 객체 (UTC일 수 있으므로, 내부에서 KST로 변환)
-    """
     kst = timezone('Asia/Seoul')
     now = dt.astimezone(kst)
     today = now.date()
@@ -133,7 +134,6 @@ async def send_levelup_embed(member, new_level):
         ),
         color=discord.Color.purple()
     )
-    # 푸터에도 반드시 KST 기준으로 표시
     footer = get_embed_footer(member, datetime.now(timezone('Asia/Seoul')))
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await honor_channel.send(embed=embed)
@@ -145,14 +145,12 @@ async def create_or_update_user_info(member):
     level = get_level_from_exp(exp)
     leveldata = LEVELS[level]
 
-    # 다음 레벨 필요 Exp 계산
     if level < len(LEVEL_THRESHOLDS) - 1:
         next_exp = LEVEL_THRESHOLDS[level]
     else:
         next_exp = exp + 100
     exp_required = next_exp - exp
 
-    # 진행도 바 계산
     if level == 1:
         current_exp = exp
         progress_total = LEVEL_THRESHOLDS[1]
@@ -192,7 +190,6 @@ async def create_or_update_user_info(member):
         inline=False
     )
 
-    # 월간 통계
     stats_month = get_monthly_stats(user_id)
     embed.add_field(
         name="📅 이번달 통계",
@@ -205,7 +202,6 @@ async def create_or_update_user_info(member):
         inline=False
     )
 
-    # 주간 통계
     stats_week = get_weekly_stats(user_id)
     embed.add_field(
         name="📆 이번주 통계",
@@ -225,7 +221,6 @@ async def create_or_update_user_info(member):
     if channel is None:
         return
 
-    # 이미 메시지가 있으면 수정, 없으면 새로 생성
     if user_id in user_info_channel_msgs:
         try:
             msg_id = user_info_channel_msgs[user_id]
@@ -251,7 +246,6 @@ async def add_exp_and_check_level(member, exp_gained):
     if new_level > old_level:
         await send_levelup_embed(member, new_level)
 
-    # 변경이 있을 때마다 내정보 채널 업데이트
     await create_or_update_user_info(member)
 
     return new_level, exp_after
@@ -306,7 +300,6 @@ async def update_ranking():
 
 @bot.event
 async def on_ready():
-    # 슬래시 커맨드 동기화
     await bot.tree.sync()
     await setup_ranking_message()
     update_ranking.start()
@@ -340,7 +333,9 @@ async def checkin(ctx):
     nickname = ctx.author.display_name
     embed_color = ctx.author.color
 
-    saved = append_to_sheet("attendance", [str(ctx.author.id), now.strftime("%Y-%m-%d"), nickname])
+    async with aiohttp.ClientSession() as session:
+        saved = await append_to_sheet(session, "attendance", [str(ctx.author.id), now.strftime("%Y-%m-%d"), nickname])
+
     streak = get_streak_attendance(str(ctx.author.id))
     total = len(get_attendance(str(ctx.author.id)))
 
@@ -375,7 +370,6 @@ async def on_interaction(interaction: discord.Interaction):
     guild = interaction.guild
 
     if custom_id == "streak_rank":
-        # 연속 출석 랭킹 계산
         cursor.execute("SELECT DISTINCT user_id FROM attendance")
         users = [row[0] for row in cursor.fetchall()]
 
@@ -407,7 +401,6 @@ async def on_interaction(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     elif custom_id == "total_rank":
-        # 누적 출석 랭킹 계산 (SQL로 TOP 10)
         cursor.execute(
             "SELECT user_id, COUNT(*) as cnt FROM attendance GROUP BY user_id ORDER BY cnt DESC LIMIT 10"
         )
@@ -439,8 +432,12 @@ async def wakeup(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
     nickname = ctx.author.display_name
     embed_color = ctx.author.color
+    user_id = str(ctx.author.id)
+    today = now.strftime("%Y-%m-%d")
 
-    already = append_to_sheet("wakeup", [user_id, today, nickname])
+    async with aiohttp.ClientSession() as session:
+        already = await append_to_sheet(session, "wakeup", [user_id, today, nickname])
+
     footer = get_embed_footer(ctx.author, now)
 
     if not already:
@@ -467,10 +464,8 @@ async def wakeup(ctx):
 
 @bot.event
 async def on_message(message):
-    # 봇 자신이 보낸 메시지는 무시
     if message.author.bot:
         return
-    # 기존 명령 처리를 계속 이어서 해주기
     await bot.process_commands(message)
 
     user_id = str(message.author.id)
@@ -481,7 +476,6 @@ async def on_message(message):
         try:
             req_msg = await channel.fetch_message(msg_id)
         except Exception:
-            # 원본 요청 메시지를 찾을 수 없으면 pending에서 제거하고 종료
             wakeup_pending.pop(user_id, None)
             return
 
@@ -493,16 +487,13 @@ async def on_message(message):
         leveldata = LEVELS[level]
         photo_url = message.attachments[0].url
 
-        # --- 유저가 올린 원본 메시지를 삭제합니다 ---
         try:
             await message.delete()
         except discord.Forbidden:
-            # 권한이 없으면 그냥 넘어갑니다
             pass
         except Exception:
             pass
 
-        # 봇 메시지(요청 메시지)를 수정해서 인증 완료 임베드를 띄웁니다
         embed = discord.Embed(
             title=f"{leveldata['emoji']} 기상 인증 완료!",
             description=(
@@ -520,7 +511,6 @@ async def on_message(message):
         await req_msg.edit(embed=embed)
         wakeup_pending.pop(user_id, None)
 
-
 # =========== 공부 입퇴장(푸터 간단 적용) ===========
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -533,7 +523,6 @@ async def on_voice_state_update(member, before, after):
     if study_channel is None:
         return
 
-    # 진짜 입장 감지
     if after.channel and after_channel in TRACKED_VOICE_CHANNELS and (not before.channel or before_channel != after_channel):
         embed = discord.Embed(
             title="🎀 공듀 스터디룸 입장 🎀",
@@ -550,7 +539,6 @@ async def on_voice_state_update(member, before, after):
             'msg_id': msg.id
         }
 
-    # 진짜 퇴장 감지
     if before.channel and before_channel in TRACKED_VOICE_CHANNELS and (not after.channel or after_channel not in TRACKED_VOICE_CHANNELS):
         session = study_sessions.pop(str(member.id), None)
         if session:
@@ -576,7 +564,7 @@ async def on_voice_state_update(member, before, after):
                 return
 
             log_study_time(str(member.id), int(duration))
-            exp = int(duration)  # 1분 = 1 경험치
+            exp = int(duration)
             level, exp_after = await add_exp_and_check_level(member, exp)
             leveldata = LEVELS[level]
             today_total = get_today_study_time(str(member.id))
@@ -805,12 +793,10 @@ async def slash_remove_exp(interaction: discord.Interaction, user: discord.Membe
     if amount < 0:
         return await interaction.response.send_message("❌ 0 이상의 값을 입력해주세요.", ephemeral=True)
 
-    # 현재 Exp와 비교해 실제 제거량을 결정
     current = get_exp(str(user.id))
     removed = min(amount, current)
     remove_exp(str(user.id), removed)
 
-    # 제거 후 최종 Exp 조회 및 업데이트
     new_total = get_exp(str(user.id))
     await create_or_update_user_info(user)
     await interaction.response.send_message(
@@ -860,7 +846,6 @@ async def slash_raffle(interaction: discord.Interaction, amount: int):
         ephemeral=False
     )
 
-# — 새로운 경험치 “설정” 명령어 —
 @bot.tree.command(name="경험치설정", description="지정한 유저의 경험치를 정확히 설정합니다.")
 @app_commands.describe(user="대상 유저", amount="설정할 Exp 값(정수, 0 이상)")
 async def slash_set_exp(interaction: discord.Interaction, user: discord.Member, amount: int):
@@ -877,4 +862,3 @@ async def slash_set_exp(interaction: discord.Interaction, user: discord.Member, 
     )
 
 bot.run(TOKEN)
-

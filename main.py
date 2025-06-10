@@ -5,7 +5,7 @@ from discord import app_commands
 from datetime import datetime, timedelta
 from pytz import timezone
 from db import (
-    save_attendance, get_attendance, add_exp, remove_exp, get_exp,
+    save_attendance, get_attendance, add_exp, remove_exp, get_exp, set_exp,
     save_wakeup, log_study_time, get_today_study_time,
     get_top_users_by_exp, get_monthly_stats, get_weekly_stats,
     get_streak_attendance, get_streak_wakeup, get_streak_study,
@@ -775,15 +775,23 @@ async def slash_add_exp(interaction: discord.Interaction, user: discord.Member, 
     await create_or_update_user_info(user)
     await interaction.response.send_message(f"✅ {user.mention}님에게 {amount} Exp를 추가했습니다.", ephemeral=True)
 
-@bot.tree.command(name="경험치제거", description="지정한 유저에게 원하는 양의 경험치를 제거합니다.")
-@app_commands.describe(user="경험치를 제거할 사용자", amount="제거할 경험치 양(정수)")
+@bot.tree.command(name="경험치제거", description="지정한 유저의 경험치를 원하는 만큼 제거합니다.")
+@app_commands.describe(user="대상 유저", amount="제거할 Exp 양(정수, 0 이상)")
 async def slash_remove_exp(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
-        return
-    if amount <= 0:
-        await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
+    if amount < 0:
+        return await interaction.response.send_message("❌ 0 이상의 값을 입력해주세요.", ephemeral=True)
+
+    current = get_exp(str(user.id))
+    removed = min(amount, current)
+    remove_exp(str(user.id), removed)
+    new_total = get_exp(str(user.id))
+    await create_or_update_user_info(user)
+    await interaction.response.send_message(
+        f"✅ {user.mention}님에게서 **{removed} Exp**를 제거했습니다. (총 Exp: **{new_total}**)", 
+        ephemeral=True
+    )
 
     # DB에서 현재 경험치 조회 후, 0 미만으로 내려가지 않도록 처리
     current = get_user_exp(str(user.id))
@@ -833,6 +841,23 @@ async def slash_raffle(interaction: discord.Interaction, amount: int):
     await create_or_update_user_info(winner)
 
     await interaction.response.send_message(f"🎉 축하합니다! {winner.mention} 님이 {amount} Exp를 당첨되셨습니다!", ephemeral=False)
+
+# — 새로운 경험치 “설정” 명령어 —
+@bot.tree.command(name="경험치설정", description="지정한 유저의 경험치를 정확히 설정합니다.")
+@app_commands.describe(user="대상 유저", amount="설정할 Exp 값(정수, 0 이상)")
+async def slash_set_exp(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
+    if amount < 0:
+        return await interaction.response.send_message("❌ 0 이상의 값을 입력해주세요.", ephemeral=True)
+
+    set_exp(str(user.id), amount)
+    await create_or_update_user_info(user)
+    await interaction.response.send_message(
+        f"✅ {user.mention}님의 Exp를 **{amount}**으로 설정했습니다.", 
+        ephemeral=True
+    )
+
 
 bot.run(TOKEN)
 

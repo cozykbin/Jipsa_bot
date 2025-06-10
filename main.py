@@ -246,9 +246,19 @@ async def add_exp_and_check_level(member, exp_gained):
     if new_level > old_level:
         await send_levelup_embed(member, new_level)
 
-    await create_or_update_user_info(member)
+    # 구글시트에 'users' 시트로 경험치 저장 요청 추가
+    async with aiohttp.ClientSession() as session:
+        # [user_id, 닉네임, 총 경험치, 레벨] 기록
+        await append_to_sheet(session, "users", [
+            user_id,
+            member.display_name,
+            exp_after,
+            new_level
+        ])
 
+    await create_or_update_user_info(member)
     return new_level, exp_after
+
 
 # =========== 랭킹 임베드 생성 함수 ===========
 def make_ranking_embed():
@@ -565,6 +575,16 @@ async def on_voice_state_update(member, before, after):
 
             log_study_time(str(member.id), int(duration))
             exp = int(duration)
+
+            # 구글 시트에 공부시간 기록 추가
+            async with aiohttp.ClientSession() as session_http:
+                await append_to_sheet(session_http, "study", [
+                    str(member.id),
+                    member.display_name,
+                    end_time.strftime("%Y-%m-%d"),
+                    int(duration)
+                ])
+
             level, exp_after = await add_exp_and_check_level(member, exp)
             leveldata = LEVELS[level]
             today_total = get_today_study_time(str(member.id))
@@ -592,6 +612,7 @@ async def on_voice_state_update(member, before, after):
                 await msg.edit(embed=embed)
             else:
                 await study_channel.send(embed=embed)
+
 
 # ===== 통계 (월간+주간+전체) =====
 @bot.command(name="통계")

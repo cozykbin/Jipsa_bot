@@ -13,6 +13,7 @@ from db import (
 )
 import random
 import os
+import requests
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -22,6 +23,27 @@ intents.voice_states = True
 intents.messages = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+# Google Apps Script 웹앱 URL (환경변수로부터)
+GSHEET_WEBHOOK = os.getenv("GSHEET_WEBHOOK")
+
+def append_to_sheet(sheet_name: str, row_data: list) -> bool:
+    """
+    Apps Script 웹훅에 POST 요청을 보내서,
+    sheet_name 탭에 row_data 행을 추가합니다.
+    """
+    if not GSHEET_WEBHOOK:
+        return False
+    payload = {
+        "sheet": sheet_name,
+        "data": row_data
+    }
+    try:
+        resp = requests.post(GSHEET_WEBHOOK, json=payload, timeout=5)
+        return resp.ok
+    except Exception:
+        return False
 
 # ==== 임베드 푸터 생성 함수 ====
 def get_embed_footer(user: discord.User, dt: datetime):
@@ -318,7 +340,7 @@ async def checkin(ctx):
     nickname = ctx.author.display_name
     embed_color = ctx.author.color
 
-    saved = save_attendance(str(ctx.author.id), nickname)
+    saved = append_to_sheet("attendance", [str(ctx.author.id), now.strftime("%Y-%m-%d"), nickname])
     streak = get_streak_attendance(str(ctx.author.id))
     total = len(get_attendance(str(ctx.author.id)))
 
@@ -418,7 +440,7 @@ async def wakeup(ctx):
     nickname = ctx.author.display_name
     embed_color = ctx.author.color
 
-    already = save_wakeup(str(ctx.author.id), nickname)
+    already = append_to_sheet("wakeup", [user_id, today, nickname])
     footer = get_embed_footer(ctx.author, now)
 
     if not already:

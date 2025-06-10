@@ -783,64 +783,60 @@ async def slash_remove_exp(interaction: discord.Interaction, user: discord.Membe
     if amount < 0:
         return await interaction.response.send_message("❌ 0 이상의 값을 입력해주세요.", ephemeral=True)
 
+    # 현재 Exp와 비교해 실제 제거량을 결정
     current = get_exp(str(user.id))
     removed = min(amount, current)
     remove_exp(str(user.id), removed)
+
+    # 제거 후 최종 Exp 조회 및 업데이트
     new_total = get_exp(str(user.id))
     await create_or_update_user_info(user)
     await interaction.response.send_message(
-        f"✅ {user.mention}님에게서 **{removed} Exp**를 제거했습니다. (총 Exp: **{new_total}**)", 
+        f"✅ {user.mention}님에게서 **{removed} Exp**를 제거했습니다. (총 Exp: **{new_total}**)",
         ephemeral=True
     )
-
-    # DB에서 현재 경험치 조회 후, 0 미만으로 내려가지 않도록 처리
-    current = get_user_exp(str(user.id))
-    new_exp = max(0, current - amount)
-    remove_exp(str(user.id), current - new_exp)  # remove_exp(user_id, amount_to_remove)
-    await create_or_update_user_info(user)
-    await interaction.response.send_message(f"✅ {user.mention}님에게서 {amount} Exp를 제거했습니다. (총 Exp: {new_exp})", ephemeral=True)
 
 @bot.tree.command(name="역할경험치추가", description="지정한 역할을 가진 모든 유저에게 원하는 양의 경험치를 지급합니다.")
 @app_commands.describe(role="대상 역할", amount="지급할 경험치 양(정수)")
 async def slash_role_add_exp(interaction: discord.Interaction, role: discord.Role, amount: int):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
     if amount <= 0:
-        await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
 
     members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
     if not members:
-        await interaction.response.send_message("❌ 해당 역할을 가진 사용자가 없습니다.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 해당 역할을 가진 사용자가 없습니다.", ephemeral=True)
 
     for m in members:
         add_exp(str(m.id), amount)
         await create_or_update_user_info(m)
 
-    await interaction.response.send_message(f"✅ 역할 `{role.name}`을(를) 가진 {len(members)}명에게 각각 {amount} Exp를 지급했습니다.", ephemeral=True)
+    await interaction.response.send_message(
+        f"✅ 역할 `{role.name}`을(를) 가진 {len(members)}명에게 각각 {amount} Exp를 지급했습니다.",
+        ephemeral=True
+    )
 
 @bot.tree.command(name="추첨", description="원하는 양의 경험치에 대한 추첨 이벤트를 진행합니다.")
 @app_commands.describe(amount="추첨하여 지급할 경험치 양(정수)")
 async def slash_raffle(interaction: discord.Interaction, amount: int):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 관리자 권한이 필요합니다.", ephemeral=True)
     if amount <= 0:
-        await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
 
     members = [m for m in interaction.guild.members if not m.bot and m.status != discord.Status.offline]
     if not members:
-        await interaction.response.send_message("❌ 추첨할 사용자 후보가 없습니다.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 추첨할 사용자 후보가 없습니다.", ephemeral=True)
 
     winner = random.choice(members)
     add_exp(str(winner.id), amount)
     await create_or_update_user_info(winner)
 
-    await interaction.response.send_message(f"🎉 축하합니다! {winner.mention} 님이 {amount} Exp를 당첨되셨습니다!", ephemeral=False)
+    await interaction.response.send_message(
+        f"🎉 축하합니다! {winner.mention} 님이 {amount} Exp를 당첨되셨습니다!",
+        ephemeral=False
+    )
 
 # — 새로운 경험치 “설정” 명령어 —
 @bot.tree.command(name="경험치설정", description="지정한 유저의 경험치를 정확히 설정합니다.")
@@ -854,10 +850,9 @@ async def slash_set_exp(interaction: discord.Interaction, user: discord.Member, 
     set_exp(str(user.id), amount)
     await create_or_update_user_info(user)
     await interaction.response.send_message(
-        f"✅ {user.mention}님의 Exp를 **{amount}**으로 설정했습니다.", 
+        f"✅ {user.mention}님의 Exp를 **{amount}**으로 설정했습니다.",
         ephemeral=True
     )
-
 
 bot.run(TOKEN)
 

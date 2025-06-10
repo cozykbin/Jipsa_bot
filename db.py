@@ -61,8 +61,8 @@ def _register_user(user_id: str, nickname: str):
             f"INSERT INTO users (user_id, nickname, exp) VALUES ({placeholder}, {placeholder}, 0)",
             (user_id, nickname)
         )
-        # commit은 호출하는 쪽에서 한번만 실행하도록 변경
-
+        conn.commit()
+    
 # === Save Attendance (KST date) ===
 def save_attendance(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")

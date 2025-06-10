@@ -169,6 +169,17 @@ def remove_exp(user_id: str, amount: int):
     )
     conn.commit()
 
+def set_exp(user_id: str, new_exp: int):
+    """
+    user_id의 exp를 정확히 new_exp로 설정합니다.
+    """
+    _register_user(user_id, "Unknown")
+    cursor.execute(
+        "UPDATE users SET exp = ? WHERE user_id = ?",
+        (new_exp, user_id)
+    )
+    conn.commit()
+
 # === 현재 경험치 조회 ===
 def get_exp(user_id: str) -> int:
     cursor.execute("SELECT exp FROM users WHERE user_id = ?", (user_id,))

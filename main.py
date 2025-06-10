@@ -13,7 +13,6 @@ from db import (
 )
 import random
 import os
-import requests
 import aiohttp
 import asyncio
 import logging
@@ -51,11 +50,9 @@ async def append_to_sheet(session: aiohttp.ClientSession, sheet_name: str, data:
         return False
 
 
-# ==== 임베드 푸터 생성 함수 ====
 def get_embed_footer(user: discord.User, dt: datetime):
     kst = timezone('Asia/Seoul')
     now = dt.astimezone(kst)
-    today = now.date()
 
     if now.date() == datetime.now(kst).date():
         label = "오늘"
@@ -73,14 +70,12 @@ def get_embed_footer(user: discord.User, dt: datetime):
         "icon_url": avatar_url
     }
 
-# ==== 랭킹 버튼 뷰 ====
 class AttendanceRankingView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(Button(label="🔥 연속 출석 랭킹", style=discord.ButtonStyle.primary, custom_id="streak_rank"))
         self.add_item(Button(label="📅 누적 출석 랭킹", style=discord.ButtonStyle.secondary, custom_id="total_rank"))
 
-# ==== 프린세스 레벨 시스템 설정 ====
 LEVELS = {
     1: {"emoji": "🪴", "name": "궁전문 앞 새싹", "desc": "드디어 궁전문을 똑똑 두드리는 우리 새싹 공듀🌱\n아직은 설렘과 긴장이 함께 찾아오지만,\n햇살이 좋은 날엔 ‘나도 뭔가 해낼 수 있을 것 같아’\n가만히 마음속 다짐이 싹 트기 시작해요."},
     2: {"emoji": "🏰", "name": "왕실 입문생", "desc": "한 걸음 더 내딛으면, 새로운 세계가 펼쳐져요!\n궁전 안에서 길을 잃기도 하고,\n간식 코너에서 몰래 쉬다 들키기도 하지만🐻‍❄️\n조금씩 나만의 리듬으로 살아가는 연습이 시작돼요.\n‘이게 바로 갓생의 첫걸음?’"},
@@ -104,23 +99,19 @@ def get_level_from_exp(exp):
 def get_user_exp(user_id):
     return get_exp(str(user_id))
 
-# 트래킹: 캠스터디 음성 채널 이름 목록
 TRACKED_VOICE_CHANNELS = ["🎥｜캠스터디"]
 study_sessions = {}
 
-# 채널 ID 상수
 RANKING_CHANNEL_ID = 1378863730741219458   # 👑｜랭킹
 HONOR_CHANNEL_ID = 1378863861863682102     # 🏆｜명예기록
 MYINFO_CHANNEL_ID = 1378952514702938182    # 🏠｜내정보
 ATTENDANCE_CHANNEL_ID = 1378862713484218489  # 🍀｜출석체크
 WAKEUP_CHANNEL_ID = 1378862771214745690       # 🌅｜기상인증
 
-# 메시지 ID 저장
 ranking_message_id = None
 wakeup_pending = {}
 user_info_channel_msgs = {}
 
-# =========== 레벨업 알림 함수 ===========
 async def send_levelup_embed(member, new_level):
     honor_channel = bot.get_channel(HONOR_CHANNEL_ID)
     if honor_channel is None:
@@ -138,7 +129,6 @@ async def send_levelup_embed(member, new_level):
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await honor_channel.send(embed=embed)
 
-# =========== 개인별 “내정보” 채널 메시지 생성/수정 ===========
 async def create_or_update_user_info(member):
     user_id = str(member.id)
     exp = get_user_exp(user_id)
@@ -233,7 +223,6 @@ async def create_or_update_user_info(member):
     new_msg = await channel.send(embed=embed)
     user_info_channel_msgs[user_id] = new_msg.id
 
-# =========== 경험치 추가 + 레벨업 감지 ===========
 async def add_exp_and_check_level(member, exp_gained):
     user_id = str(member.id)
     exp_before = get_user_exp(user_id)
@@ -246,9 +235,7 @@ async def add_exp_and_check_level(member, exp_gained):
     if new_level > old_level:
         await send_levelup_embed(member, new_level)
 
-    # 구글시트에 'users' 시트로 경험치 저장 요청 추가
     async with aiohttp.ClientSession() as session:
-        # [user_id, 닉네임, 총 경험치, 레벨] 기록
         await append_to_sheet(session, "users", [
             user_id,
             member.display_name,
@@ -259,8 +246,6 @@ async def add_exp_and_check_level(member, exp_gained):
     await create_or_update_user_info(member)
     return new_level, exp_after
 
-
-# =========== 랭킹 임베드 생성 함수 ===========
 def make_ranking_embed():
     now = datetime.now(timezone('Asia/Seoul'))
     today_str = now.strftime("%Y년 %m월 %d일")
@@ -282,7 +267,6 @@ def make_ranking_embed():
     embed.set_footer(text=today_str)
     return embed
 
-# =========== 랭킹 메시지 자동 갱신(1분마다) ===========
 @tasks.loop(minutes=1)
 async def update_ranking():
     global ranking_message_id
@@ -336,21 +320,28 @@ async def setup_ranking_message():
         await msg.pin()
         ranking_message_id = msg.id
 
-# =========== 출석(수정됨: 연속/총 횟수 표시 + 버튼) ===========
 @bot.command(name="출석")
 async def checkin(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
     nickname = ctx.author.display_name
     embed_color = ctx.author.color
-
+    
+    saved_db = save_attendance(str(ctx.author.id), nickname)
+    
     async with aiohttp.ClientSession() as session:
-        saved = await append_to_sheet(session, "attendance", [str(ctx.author.id), now.strftime("%Y-%m-%d"), nickname])
+        saved_sheet = await append_to_sheet(
+            session,
+            "attendance",
+            [str(ctx.author.id), now.strftime("%Y-%m-%d"), nickname]
+        )
 
+    # 출석 데이터에서 연속출석, 총 출석 횟수 조회
+    attendance_rows = get_attendance(str(ctx.author.id))
     streak = get_streak_attendance(str(ctx.author.id))
-    total = len(get_attendance(str(ctx.author.id)))
+    total = len(attendance_rows) if attendance_rows else 0
 
     embed = discord.Embed(color=embed_color)
-    if not saved:
+    if not saved_db:
         embed.title = "👑 출석 실패"
         embed.description = f"{ctx.author.mention} 공듀님, 오늘은 이미 출석하셨어요! 🐣"
     else:
@@ -373,7 +364,6 @@ async def checkin(ctx):
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await ctx.send(embed=embed, view=AttendanceRankingView())
 
-# =========== 랭킹 버튼 클릭 처리 ===========
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     custom_id = interaction.data.get("custom_id")
@@ -436,7 +426,6 @@ async def on_interaction(interaction: discord.Interaction):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# =========== 기상(푸터 적용) ===========
 @bot.command(name="기상")
 async def wakeup(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
@@ -445,12 +434,14 @@ async def wakeup(ctx):
     user_id = str(ctx.author.id)
     today = now.strftime("%Y-%m-%d")
 
+    already_db = save_wakeup(user_id, nickname) 
+
     async with aiohttp.ClientSession() as session:
         already = await append_to_sheet(session, "wakeup", [user_id, today, nickname])
 
     footer = get_embed_footer(ctx.author, now)
 
-    if not already:
+    if not already_db:
         embed = discord.Embed(
             title="☀️ 기상 실패",
             description=f"{ctx.author.mention} 공듀님, 오늘은 이미 기상 인증했어요! ☀️",
@@ -521,7 +512,6 @@ async def on_message(message):
         await req_msg.edit(embed=embed)
         wakeup_pending.pop(user_id, None)
 
-# =========== 공부 입퇴장(푸터 간단 적용) ===========
 @bot.event
 async def on_voice_state_update(member, before, after):
     now = datetime.now(timezone('Asia/Seoul'))
@@ -576,7 +566,6 @@ async def on_voice_state_update(member, before, after):
             log_study_time(str(member.id), int(duration))
             exp = int(duration)
 
-            # 구글 시트에 공부시간 기록 추가
             async with aiohttp.ClientSession() as session_http:
                 await append_to_sheet(session_http, "study", [
                     str(member.id),
@@ -613,8 +602,6 @@ async def on_voice_state_update(member, before, after):
             else:
                 await study_channel.send(embed=embed)
 
-
-# ===== 통계 (월간+주간+전체) =====
 @bot.command(name="통계")
 async def show_stats(ctx):
     user_id = str(ctx.author.id)
@@ -685,7 +672,6 @@ async def show_stats(ctx):
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await ctx.send(embed=embed)
 
-# ===== 기록 (출석 날짜 + 연속) =====
 @bot.command(name="기록")
 async def show_records(ctx):
     user_id = str(ctx.author.id)
@@ -731,7 +717,6 @@ async def show_records(ctx):
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await ctx.send(embed=embed)
 
-# ===== 명령어 안내 =====
 @bot.command(name="명령어")
 async def command_list(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
@@ -785,13 +770,11 @@ async def command_list(ctx):
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await ctx.send(embed=embed)
 
-# ===== 내정보 명령어 =====
 @bot.command(name="내정보")
 async def my_info(ctx):
     await create_or_update_user_info(ctx.author)
     await ctx.send(f"{ctx.author.mention}님의 내정보를 <#{MYINFO_CHANNEL_ID}> 채널에 업데이트했어요!")
 
-# ===== 관리자용 슬래시 명령어 모음 =====
 @bot.tree.command(name="경험치추가", description="지정한 유저에게 원하는 양의 경험치를 지급합니다.")
 @app_commands.describe(user="경험치를 받을 사용자", amount="지급할 경험치 양(정수)")
 async def slash_add_exp(interaction: discord.Interaction, user: discord.Member, amount: int):

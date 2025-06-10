@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from datetime import datetime, timedelta
 from pytz import timezone
 
@@ -16,12 +17,11 @@ if DATABASE_URL:
     cursor = conn.cursor()
     placeholder = "%s"
 else:
-    import sqlite3
     conn = sqlite3.connect("princess.db", check_same_thread=False)
     cursor = conn.cursor()
     placeholder = "?"
 
-# === 테이블 생성 (두 DB 모두 호환) ===
+# === Table Creation ===
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS study (
 """)
 conn.commit()
 
-# === 내부: 사용자 등록 ===
+# === Internal: Register User ===
 def _register_user(user_id: str, nickname: str):
     cursor.execute(
         f"SELECT 1 FROM users WHERE user_id = {placeholder}",
@@ -63,7 +63,7 @@ def _register_user(user_id: str, nickname: str):
         )
         conn.commit()
 
-# === 출석 저장 ===
+# === Save Attendance (KST date) ===
 def save_attendance(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
     cursor.execute(
@@ -72,7 +72,6 @@ def save_attendance(user_id: str, nickname: str) -> bool:
     )
     if cursor.fetchone():
         return False
-
     cursor.execute(
         f"INSERT INTO attendance (user_id, date) VALUES ({placeholder}, {placeholder})",
         (user_id, today)
@@ -81,7 +80,7 @@ def save_attendance(user_id: str, nickname: str) -> bool:
     conn.commit()
     return True
 
-# === 출석 기록 조회 ===
+# === Get Attendance Records ===
 def get_attendance(user_id: str):
     cursor.execute(
         f"SELECT date FROM attendance WHERE user_id = {placeholder} ORDER BY date DESC",
@@ -89,7 +88,7 @@ def get_attendance(user_id: str):
     )
     return cursor.fetchall()
 
-# === 기상 인증 저장 ===
+# === Save Wakeup (KST date) ===
 def save_wakeup(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
     cursor.execute(
@@ -98,7 +97,6 @@ def save_wakeup(user_id: str, nickname: str) -> bool:
     )
     if cursor.fetchone():
         return False
-
     cursor.execute(
         f"INSERT INTO wakeup (user_id, date) VALUES ({placeholder}, {placeholder})",
         (user_id, today)
@@ -107,7 +105,7 @@ def save_wakeup(user_id: str, nickname: str) -> bool:
     conn.commit()
     return True
 
-# === 공부 시간 기록 ===
+# === Log Study Time (accumulate) ===
 def log_study_time(user_id: str, minutes: int):
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
     _register_user(user_id, "Unknown")
@@ -129,7 +127,7 @@ def log_study_time(user_id: str, minutes: int):
         )
     conn.commit()
 
-# === 오늘 공부 시간 조회 ===
+# === Get Today's Study Time ===
 def get_today_study_time(user_id: str) -> int:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
     cursor.execute(
@@ -139,7 +137,7 @@ def get_today_study_time(user_id: str) -> int:
     row = cursor.fetchone()
     return row[0] if row else 0
 
-# === 경험치 추가/제거 ===
+# === Experience Management ===
 def add_exp(user_id: str, amount: int):
     cursor.execute(
         f"SELECT exp FROM users WHERE user_id = {placeholder}",
@@ -184,7 +182,7 @@ def get_exp(user_id: str) -> int:
     row = cursor.fetchone()
     return row[0] if row else 0
 
-# === 상위 유저 조회 ===
+# === Top Users by Exp ===
 def get_top_users_by_exp(limit: int = 10):
     cursor.execute(
         f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {placeholder}",
@@ -192,7 +190,7 @@ def get_top_users_by_exp(limit: int = 10):
     )
     return cursor.fetchall()
 
-# === 월간/주간 통계 ===
+# === Monthly Stats ===
 def get_monthly_stats(user_id: str):
     now = datetime.now(timezone("Asia/Seoul"))
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
@@ -200,33 +198,25 @@ def get_monthly_stats(user_id: str):
     month_end = (next_month - timedelta(days=1)).strftime("%Y-%m-%d")
 
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, month_start, month_end)
     )
     attendance = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM wakeup WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COUNT(DISTINCT date) FROM wakeup WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, month_start, month_end)
     )
     wakeup = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM study WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder} AND minutes >= 10",
+        f"SELECT COUNT(DISTINCT date) FROM study WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder} AND minutes >= 10",
         (user_id, month_start, month_end)
     )
     study_days = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COALESCE(SUM(minutes), 0) FROM study WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COALESCE(SUM(minutes), 0) FROM study WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, month_start, month_end)
     )
     study_minutes = cursor.fetchone()[0]
-
     return {
         "attendance": attendance,
         "wakeup": wakeup,
@@ -235,39 +225,31 @@ def get_monthly_stats(user_id: str):
         "exp": get_exp(user_id)
     }
 
+# === Weekly Stats ===
 def get_weekly_stats(user_id: str):
     now = datetime.now(timezone("Asia/Seoul"))
     week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
     week_end = (now + timedelta(days=6 - now.weekday())).strftime("%Y-%m-%d")
-
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, week_start, week_end)
     )
     attendance = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM wakeup WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COUNT(DISTINCT date) FROM wakeup WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, week_start, week_end)
     )
     wakeup = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COUNT(DISTINCT date) FROM study WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder} AND minutes >= 10",
+        f"SELECT COUNT(DISTINCT date) FROM study WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder} AND minutes >= 10",
         (user_id, week_start, week_end)
     )
     study_days = cursor.fetchone()[0]
-
     cursor.execute(
-        f"SELECT COALESCE(SUM(minutes), 0) FROM study WHERE user_id = {placeholder} 
-         AND date BETWEEN {placeholder} AND {placeholder}",
+        f"SELECT COALESCE(SUM(minutes), 0) FROM study WHERE user_id = {placeholder} AND date BETWEEN {placeholder} AND {placeholder}",
         (user_id, week_start, week_end)
     )
     study_minutes = cursor.fetchone()[0]
-
     return {
         "attendance": attendance,
         "wakeup": wakeup,
@@ -276,7 +258,7 @@ def get_weekly_stats(user_id: str):
         "exp": get_exp(user_id)
     }
 
-# === 연속 기록 계산 ===
+# === Streak Calculation ===
 def _calculate_streak_from_dates(date_list):
     if not date_list:
         return 0

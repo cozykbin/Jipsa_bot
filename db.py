@@ -61,22 +61,23 @@ def _register_user(user_id: str, nickname: str):
             f"INSERT INTO users (user_id, nickname, exp) VALUES ({placeholder}, {placeholder}, 0)",
             (user_id, nickname)
         )
-        conn.commit()
+        # commit은 호출하는 쪽에서 한번만 실행하도록 변경
 
 # === Save Attendance (KST date) ===
 def save_attendance(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
+    _register_user(user_id, nickname)  # 저장 전에 등록부터 확실히
     cursor.execute(
         f"SELECT 1 FROM attendance WHERE user_id = {placeholder} AND date = {placeholder}",
         (user_id, today)
     )
     if cursor.fetchone():
         return False
+
     cursor.execute(
         f"INSERT INTO attendance (user_id, date) VALUES ({placeholder}, {placeholder})",
         (user_id, today)
     )
-    _register_user(user_id, nickname)
     conn.commit()
     return True
 
@@ -91,17 +92,18 @@ def get_attendance(user_id: str):
 # === Save Wakeup (KST date) ===
 def save_wakeup(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
+    _register_user(user_id, nickname)  # 저장 전에 등록부터 확실히
     cursor.execute(
         f"SELECT 1 FROM wakeup WHERE user_id = {placeholder} AND date = {placeholder}",
         (user_id, today)
     )
     if cursor.fetchone():
         return False
+
     cursor.execute(
         f"INSERT INTO wakeup (user_id, date) VALUES ({placeholder}, {placeholder})",
         (user_id, today)
     )
-    _register_user(user_id, nickname)
     conn.commit()
     return True
 
@@ -184,10 +186,16 @@ def get_exp(user_id: str) -> int:
 
 # === Top Users by Exp ===
 def get_top_users_by_exp(limit: int = 10):
-    cursor.execute(
-        f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {placeholder}",
-        (limit,)
-    )
+    # SQLite는 LIMIT 파라미터 바인딩 미지원하므로 포맷팅으로 직접 삽입
+    if placeholder == "?":  # SQLite
+        cursor.execute(
+            f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {limit}"
+        )
+    else:
+        cursor.execute(
+            f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {placeholder}",
+            (limit,)
+        )
     return cursor.fetchall()
 
 # === Monthly Stats ===

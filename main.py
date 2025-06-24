@@ -865,4 +865,50 @@ async def slash_set_exp(interaction: discord.Interaction, user: discord.Member, 
         ephemeral=True
     )
 
+@bot.tree.command(
+    name="공부추가",
+    description="관리자가 지정한 유저의 오늘 공부 시간을 수동으로 추가합니다."
+)
+@app_commands.describe(
+    user="공부 시간을 추가할 사용자",
+    minutes="추가할 공부 시간 (분 단위, 양수)"
+)
+async def slash_add_study(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    minutes: int
+):
+    # 1) 관리자 권한 검사
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ 관리자 권한이 필요합니다.",
+            ephemeral=True
+        )
+    # 2) 파라미터 검증
+    if minutes <= 0:
+        return await interaction.response.send_message(
+            "❌ 1분 이상의 양수를 입력해주세요.",
+            ephemeral=True
+        )
+
+    # 3) DB에 공부시간 기록
+    #    -- db.py 에 정의된 log_study_time 함수는 '오늘(Asia/Seoul)' 기준으로 누적해 줍니다.
+    log_study_time(str(user.id), minutes)
+
+    # 4) 경험치(=분 단위) 추가 및 레벨업 처리
+    #    -- add_exp_and_check_level 은 내부적으로 add_exp 호출 후
+    #       레벨업 알림, 내정보 업데이트까지 알아서 해 줍니다.
+    level, exp_after = await add_exp_and_check_level(user, minutes)
+
+    # 5) 오늘 총 공부시간 조회
+    total_today = get_today_study_time(str(user.id))
+
+    # 6) 피드백 전송
+    await interaction.response.send_message(
+        f"✅ {user.mention}님의 오늘 공부 시간으로 **{minutes}분**을 추가했습니다.\n"
+        f"⏳ 오늘 누적 공부 시간: **{total_today}분**\n"
+        f"🌹 **{minutes} Exp**를 획득했어요!",
+        ephemeral=True
+    )
+
 bot.run(TOKEN)

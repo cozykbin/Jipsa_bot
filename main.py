@@ -785,7 +785,7 @@ async def slash_add_exp(interaction: discord.Interaction, user: discord.Member, 
         await interaction.response.send_message("❌ 올바른 양을 입력해주세요 (양수).", ephemeral=True)
         return
 
-    add_exp(str(user.id), amount)
+    add_exp(str(user.id), user.display_name, amount)
     await create_or_update_user_info(user)
     await interaction.response.send_message(f"✅ {user.mention}님에게 {amount} Exp를 추가했습니다.", ephemeral=True)
 
@@ -821,7 +821,7 @@ async def slash_role_add_exp(interaction: discord.Interaction, role: discord.Rol
         return await interaction.response.send_message("❌ 해당 역할을 가진 사용자가 없습니다.", ephemeral=True)
 
     for m in members:
-        add_exp(str(m.id), amount)
+        add_exp(str(m.id), m.display_name, amount)
         await create_or_update_user_info(m)
 
     await interaction.response.send_message(
@@ -842,7 +842,7 @@ async def slash_raffle(interaction: discord.Interaction, amount: int):
         return await interaction.response.send_message("❌ 추첨할 사용자 후보가 없습니다.", ephemeral=True)
 
     winner = random.choice(members)
-    add_exp(str(winner.id), amount)
+    add_exp(str(winner.id), winner.display_name, amount)
     await create_or_update_user_info(winner)
 
     await interaction.response.send_message(

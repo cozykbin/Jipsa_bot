@@ -24,49 +24,57 @@ else:
 # === Table Creation ===
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY,
-    nickname TEXT,
-    exp INTEGER DEFAULT 0
+    user_id   TEXT PRIMARY KEY,
+    nickname  TEXT,
+    exp       INTEGER DEFAULT 0
 )
 """)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS attendance (
     user_id TEXT,
-    date TEXT
+    date    TEXT
 )
 """)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS wakeup (
     user_id TEXT,
-    date TEXT
+    date    TEXT
 )
 """)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS study (
     user_id TEXT,
-    date TEXT,
+    date    TEXT,
     minutes INTEGER
 )
 """)
 conn.commit()
 
-# === Internal: Register User ===
+# === Internal: Register or Update User ===
 def _register_user(user_id: str, nickname: str):
+    # 1) 동일한 user_id가 있는지 확인
     cursor.execute(
         f"SELECT 1 FROM users WHERE user_id = {placeholder}",
         (user_id,)
     )
     if not cursor.fetchone():
+        # 2-1) 없으면 INSERT
         cursor.execute(
             f"INSERT INTO users (user_id, nickname, exp) VALUES ({placeholder}, {placeholder}, 0)",
             (user_id, nickname)
         )
-        conn.commit()
-    
+    else:
+        # 2-2) 있으면 nickname만 UPDATE (새 닉네임 반영)
+        cursor.execute(
+            f"UPDATE users SET nickname = {placeholder} WHERE user_id = {placeholder}",
+            (nickname, user_id)
+        )
+    conn.commit()
+
 # === Save Attendance (KST date) ===
 def save_attendance(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
-    _register_user(user_id, nickname)  # 저장 전에 등록부터 확실히
+    _register_user(user_id, nickname)
     cursor.execute(
         f"SELECT 1 FROM attendance WHERE user_id = {placeholder} AND date = {placeholder}",
         (user_id, today)
@@ -92,7 +100,7 @@ def get_attendance(user_id: str):
 # === Save Wakeup (KST date) ===
 def save_wakeup(user_id: str, nickname: str) -> bool:
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
-    _register_user(user_id, nickname)  # 저장 전에 등록부터 확실히
+    _register_user(user_id, nickname)
     cursor.execute(
         f"SELECT 1 FROM wakeup WHERE user_id = {placeholder} AND date = {placeholder}",
         (user_id, today)
@@ -110,6 +118,7 @@ def save_wakeup(user_id: str, nickname: str) -> bool:
 # === Log Study Time (accumulate) ===
 def log_study_time(user_id: str, minutes: int):
     today = datetime.now(timezone("Asia/Seoul")).strftime("%Y-%m-%d")
+    # study는 nickname 불필요하니 Unknown 고정
     _register_user(user_id, "Unknown")
     cursor.execute(
         f"SELECT minutes FROM study WHERE user_id = {placeholder} AND date = {placeholder}",
@@ -140,23 +149,14 @@ def get_today_study_time(user_id: str) -> int:
     return row[0] if row else 0
 
 # === Experience Management ===
-def add_exp(user_id: str, amount: int):
+def add_exp(user_id: str, nickname: str, amount: int):
+    # 1) 매번 사용자 등록 또는 닉네임 업데이트
+    _register_user(user_id, nickname)
+    # 2) exp 누적
     cursor.execute(
-        f"SELECT exp FROM users WHERE user_id = {placeholder}",
-        (user_id,)
+        f"UPDATE users SET exp = exp + {placeholder} WHERE user_id = {placeholder}",
+        (amount, user_id)
     )
-    row = cursor.fetchone()
-    if row:
-        new_exp = row[0] + amount
-        cursor.execute(
-            f"UPDATE users SET exp = {placeholder} WHERE user_id = {placeholder}",
-            (new_exp, user_id)
-        )
-    else:
-        cursor.execute(
-            f"INSERT INTO users (user_id, nickname, exp) VALUES ({placeholder}, {placeholder}, {placeholder})",
-            (user_id, "Unknown", amount)
-        )
     conn.commit()
 
 def remove_exp(user_id: str, amount: int):
@@ -186,12 +186,11 @@ def get_exp(user_id: str) -> int:
 
 # === Top Users by Exp ===
 def get_top_users_by_exp(limit: int = 10):
-    # SQLite는 LIMIT 파라미터 바인딩 미지원하므로 포맷팅으로 직접 삽입
     if placeholder == "?":  # SQLite
         cursor.execute(
             f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {limit}"
         )
-    else:
+    else:  # Postgres
         cursor.execute(
             f"SELECT nickname, exp FROM users ORDER BY exp DESC LIMIT {placeholder}",
             (limit,)

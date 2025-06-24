@@ -228,7 +228,7 @@ async def add_exp_and_check_level(member, exp_gained):
     exp_before = get_user_exp(user_id)
     old_level = get_level_from_exp(exp_before)
 
-    add_exp(user_id, exp_gained)
+    add_exp(user_id, member.display_name, exp_gained)
     exp_after = exp_before + exp_gained
     new_level = get_level_from_exp(exp_after)
 

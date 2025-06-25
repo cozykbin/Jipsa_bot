@@ -99,8 +99,7 @@ def get_level_from_exp(exp):
 def get_user_exp(user_id):
     return get_exp(str(user_id))
 
-TRACKED_VOICE_CHANNELS = ["🎥｜캠스터디", "📖｜1인실 (A)", "📖｜1인실 (B)", "📓｜도서관
-", "🌆｜워크스페이스"]
+TRACKED_VOICE_CHANNELS = ["🎥｜캠스터디", "📖｜1인실 (A)", "📖｜1인실 (B)", "📓｜도서관", "🌆｜워크스페이스"]
 study_sessions = {}
 
 RANKING_CHANNEL_ID = 1378863730741219458   # 👑｜랭킹

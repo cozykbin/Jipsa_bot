@@ -22,8 +22,6 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 logger = logging.getLogger(__name__)
-
-# [추가] 캠스터디 채널 이름 상수
 CAM_STUDY_CHANNEL = "🎥｜캠스터디"
 CAM_BONUS_MULTIPLIER = 2
 
@@ -90,7 +88,6 @@ def get_level_from_exp(exp):
 async def get_user_exp(user_id):
     return await db.get_exp(str(user_id))
 
-# ... (send_levelup_embed, create_or_update_user_info, add_exp_and_check_level 등 기존과 동일)
 async def send_levelup_embed(member, new_level):
     honor_channel = bot.get_channel(HONOR_CHANNEL_ID)
     if honor_channel is None: return
@@ -160,6 +157,10 @@ async def create_or_update_user_info(member):
     new_msg = await channel.send(embed=embed)
     user_info_channel_msgs[user_id] = new_msg.id
 
+# ====================================================================================
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# [수정] add_exp_and_check_level: 랭킹 업데이트 호출 추가
+# ====================================================================================
 async def add_exp_and_check_level(member, exp_gained):
     user_id = str(member.id)
     exp_before = await get_user_exp(user_id)
@@ -172,9 +173,12 @@ async def add_exp_and_check_level(member, exp_gained):
     async with aiohttp.ClientSession() as session:
         await append_to_sheet(session, "users", [user_id, member.display_name, exp_after, new_level])
     await create_or_update_user_info(member)
+    
+    # 경험치 변경이 완료된 후, 랭킹 업데이트 함수를 직접 호출!
+    await update_ranking()
+    
     return new_level, exp_after
 
-# ... (make_ranking_embed, update_ranking, on_ready, setup_ranking_message 등 기존과 동일)
 async def make_ranking_embed():
     now = datetime.now(timezone('Asia/Seoul'))
     today_str = now.strftime("%Y년 %m월 %d일 %H:%M 기준")
@@ -193,12 +197,17 @@ async def make_ranking_embed():
     embed.set_footer(text=f"마지막 업데이트: {today_str}")
     return embed
 
-@tasks.loop(minutes=1)
+# ====================================================================================
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# [수정] update_ranking: 더 이상 tasks.loop가 아님
+# ====================================================================================
 async def update_ranking():
+    """경험치 순위가 변경될 때마다 호출되는 함수"""
     global ranking_message_id
     channel = bot.get_channel(RANKING_CHANNEL_ID)
     if channel is None: return
     if ranking_message_id is None:
+        # 랭킹 메시지가 없는 경우, 먼저 설정
         await setup_ranking_message()
         if ranking_message_id is None: return
     try:
@@ -206,7 +215,9 @@ async def update_ranking():
         embed = await make_ranking_embed()
         await msg.edit(embed=embed)
     except discord.NotFound:
+        # 메시지가 삭제된 경우, ID를 초기화하고 새로 생성
         ranking_message_id = None
+        await setup_ranking_message()
     except Exception as e:
         logger.error(f"랭킹 업데이트 중 오류: {e}")
 
@@ -215,8 +226,9 @@ async def on_ready():
     await db.initialize_database()
     bot.add_view(AttendanceRankingView())
     await bot.tree.sync()
+    # [삭제] 더 이상 1분마다 업데이트하지 않음
+    # update_ranking.start() 
     await setup_ranking_message()
-    update_ranking.start()
     print(f"✅ {bot.user} 로그인 완료")
 
 async def setup_ranking_message():
@@ -233,28 +245,14 @@ async def setup_ranking_message():
         await msg.pin()
         ranking_message_id = msg.id
 
-# ====================================================================================
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-# [신규] 캠스터디 10분 유예시간 체크 및 자동 강퇴 함수
-# ====================================================================================
 async def check_and_kick(member: discord.Member):
-    """10분(600초) 후에 멤버의 카메라 상태를 확인하고, 꺼져있으면 강퇴시키는 함수"""
     await asyncio.sleep(600)
-
     user_id = str(member.id)
-    
-    # 10분 후, 멤버가 서버에 없거나 다른 채널로 이동했다면 함수 종료
     if not member.guild or not member.voice or member.voice.channel.name != CAM_STUDY_CHANNEL:
         return
-
-    # 10분 후, DB에서 세션 정보를 가져옴
     session = await db.get_study_session(user_id)
-    
-    # 세션이 없거나(이미 퇴장 처리됨) 배율이 1이 아니면(이미 캠을 켬) 함수 종료
     if not session or session.get('multiplier', 1) != 1:
         return
-
-    # 위의 모든 조건을 통과했다면 -> 10분 동안 캠을 켜지 않은 유저
     try:
         study_channel = discord.utils.get(member.guild.text_channels, name="📕｜공부기록")
         if study_channel:
@@ -264,130 +262,124 @@ async def check_and_kick(member: discord.Member):
             embed.description = f"{member.mention} 공듀님, 10분 내에 카메라를 켜지 않아 채널에서 이동되었어요."
             embed.color = discord.Color.red()
             await msg.edit(embed=embed)
-
         await member.move_to(None, reason="캠스터디 10분 내 카메라 미사용")
     except Exception as e:
         logger.error(f"{member.display_name}님 강퇴 처리 중 오류: {e}")
     finally:
-        # 강퇴 후에는 공부 세션 기록을 완전히 삭제 (경험치 지급 방지)
         await db.delete_study_session(user_id)
 
-# ====================================================================================
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-# [수정] on_voice_state_update: 캠스터디 채널 관련 로직 대폭 수정
-# ====================================================================================
 @bot.event
 async def on_voice_state_update(member, before, after):
     now_kst = datetime.now(timezone('Asia/Seoul'))
     user_id = str(member.id)
-    
     study_channel = discord.utils.get(member.guild.text_channels, name="📕｜공부기록")
     if study_channel is None: return
-
-    # 채널 상태 정의
     before_channel_name = before.channel.name if before.channel else None
     after_channel_name = after.channel.name if after.channel else None
     is_before_study = before_channel_name in TRACKED_VOICE_CHANNELS
     is_after_study = after_channel_name in TRACKED_VOICE_CHANNELS
-
-    # --- 시나리오 1: 공부 시작 (스터디 채널 입장) ---
     if is_after_study and not is_before_study:
         footer = get_embed_footer(member, now_kst)
-        
-        # 캠스터디 채널에 입장한 경우
         if after_channel_name == CAM_STUDY_CHANNEL:
             embed = discord.Embed(title="📸 캠스터디 입장!", color=member.color)
-            embed.description = (
-                f"{member.mention} 공듀님, 캠스터디에 오신 것을 환영해요!\n\n"
-                f"**10분 내에 카메라나 화면 공유를 켜주세요.**\n"
-                f"규칙을 지키지 않으면 자동으로 채널에서 내보내져요! 😥"
-            )
+            embed.description = (f"{member.mention} 공듀님, 캠스터디에 오신 것을 환영해요!\n\n"
+                               f"**10분 내에 카메라나 화면 공유를 켜주세요.**\n"
+                               f"규칙을 지키지 않으면 자동으로 채널에서 내보내져요! 😥")
             embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
             msg = await study_channel.send(embed=embed)
             await db.start_study_session(user_id, now_kst, msg.id)
-            # 10분 타이머 시작
             bot.loop.create_task(check_and_kick(member))
-        
-        # 일반 스터디 채널에 입장한 경우
         else:
             embed = discord.Embed(title="🎀 공듀 스터디룸 입장 🎀", color=member.color)
-            embed.description = (
-                f"{member.mention} 공듀님이 도서관에 나타났어요!\n"
-                f"오늘도 집중모드 발동✨\n공부 시작 시간: {now_kst.strftime('%H:%M:%S')}"
-            )
+            embed.description = (f"{member.mention} 공듀님이 도서관에 나타났어요!\n"
+                               f"오늘도 집중모드 발동✨\n공부 시작 시간: {now_kst.strftime('%H:%M:%S')}")
             embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
             msg = await study_channel.send(embed=embed)
             await db.start_study_session(user_id, now_kst, msg.id)
-
-    # --- 시나리오 2: 공부 종료 (스터디 채널 퇴장) ---
     elif is_before_study and not is_after_study:
         session = await db.end_study_session(user_id)
         if not session: return
-
         end_time = now_kst
         duration_minutes = (end_time - session['start']).total_seconds() / 60
-        
         try: msg = await study_channel.fetch_message(session['msg_id'])
         except Exception: msg = None
-
         if duration_minutes < 10:
             embed = discord.Embed(title="⏰ 집중 실패! (10분 미만)", description=f"{member.mention} 공듀님, 10분 미만은 집중 인정 불가에요!", color=member.color)
             embed.set_footer(text=get_embed_footer(member, end_time)["text"], icon_url=get_embed_footer(member, end_time)["icon_url"])
             if msg: await msg.edit(embed=embed)
             return
-
         duration_int = int(duration_minutes)
-        # [수정] 경험치 계산 시 배율 적용
         multiplier = session.get('multiplier', 1)
         exp_gained = duration_int * multiplier
-
         await db.log_study_time(user_id, member.display_name, duration_int)
         level, exp_after = await add_exp_and_check_level(member, exp_gained)
         leveldata = LEVELS[level]
         today_total = await db.get_today_study_time(user_id)
         h, m = divmod(duration_int, 60)
         time_str = f"{h}시간 {m}분" if h else f"{m}분"
-
         embed = discord.Embed(title=f"{leveldata['emoji']} 집중 완료! 공듀 퇴장 ✨", description=f"{member.mention} 공듀님 오늘도 대단해요!\n공부박스 도착🎁", color=member.color)
         embed.add_field(name="⏳ 공부한 시간", value=f"**{time_str}**", inline=False)
         embed.add_field(name="🌹 획득 Exp", value=f"**{exp_gained} Exp**{' (🔥 2배 보너스!)' if multiplier > 1 else ''}", inline=True)
         embed.add_field(name="👑 오늘 누적", value=f"**{today_total}분**", inline=True)
         embed.add_field(name="🏅 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}", inline=False)
         embed.set_footer(text=get_embed_footer(member, end_time)["text"], icon_url=get_embed_footer(member, end_time)["icon_url"])
-
         if msg: await msg.edit(embed=embed)
         else: await study_channel.send(embed=embed)
-
-    # --- 시나리오 3: 채널 내 상태 변경 (카메라 On/Off 등) ---
     elif is_after_study and after_channel_name == CAM_STUDY_CHANNEL:
         session = await db.get_study_session(user_id)
         if not session: return
-
         is_cam_on = after.self_video or after.self_stream
         current_multiplier = session.get('multiplier', 1)
-        
         try:
             msg = await study_channel.fetch_message(session['msg_id'])
             embed = msg.embeds[0]
-
-            # 카메라/방송을 켰고, 현재 보너스를 받고 있지 않다면 -> 보너스 적용
             if is_cam_on and current_multiplier == 1:
                 await db.update_study_multiplier(user_id, CAM_BONUS_MULTIPLIER)
                 embed.title = "열공 모드 ON 🔥"
                 embed.description = f"{member.mention} 공듀님, 집중하는 모습이 멋져요!\n**지금부터 경험치가 2배로 적용됩니다!**"
                 embed.color = discord.Color.green()
                 await msg.edit(embed=embed)
-
-            # 카메라/방송을 껐고, 현재 보너스를 받고 있다면 -> 보너스 해제
             elif not is_cam_on and current_multiplier > 1:
                 await db.update_study_multiplier(user_id, 1)
                 embed.title = "📸 캠스터디 (일반 모드)"
                 embed.description = f"{member.mention} 공듀님, 휴식이 필요하신가요?\n카메라나 화면 공유를 다시 켜면 경험치 2배가 적용돼요!"
                 embed.color = member.color
                 await msg.edit(embed=embed)
-
         except Exception as e:
             logger.error(f"캠스터디 상태 업데이트 중 오류: {e}")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    if not message.content.startswith(bot.command_prefix) and message.attachments:
+        user_id = str(message.author.id)
+        pending_msg_id = await db.get_and_remove_wakeup_pending(user_id)
+        if pending_msg_id:
+            try:
+                req_msg = await message.channel.fetch_message(pending_msg_id)
+            except Exception:
+                return
+            now = datetime.now(timezone('Asia/Seoul'))
+            footer = get_embed_footer(message.author, now)
+            hour = now.hour
+            exp_gained = 200 if hour < 9 else 100
+            level, exp_after = await add_exp_and_check_level(message.author, exp_gained)
+            leveldata = LEVELS[level]
+            photo_url = message.attachments[0].url
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            embed = discord.Embed(title=f"{leveldata['emoji']} 기상 인증 완료!", 
+                                  description=f"{message.author.mention} 공듀님, 기상 인증 완료! 오늘 하루 멋지게 시작해요 🌞 (+{exp_gained} Exp)", 
+                                  color=message.author.color)
+            embed.set_image(url=photo_url)
+            embed.add_field(name="🎁 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}")
+            embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
+            await req_msg.edit(embed=embed)
+            return
+    await bot.process_commands(message)
 
 # ... (이하 !출석, !기상, !통계, !기록, !명령어, 슬래시 커맨드 등 기존 코드와 동일)
 @bot.command(name="출석")
@@ -453,32 +445,6 @@ async def wakeup(ctx):
     msg = await ctx.send(embed=embed)
     await db.add_wakeup_pending(user_id, msg.id)
 
-@bot.event
-async def on_message(message):
-    if message.author.bot: return
-    await bot.process_commands(message)
-    user_id = str(message.author.id)
-    pending_msg_id = await db.get_and_remove_wakeup_pending(user_id)
-    if pending_msg_id and message.attachments:
-        try:
-            req_msg = await message.channel.fetch_message(pending_msg_id)
-        except Exception:
-            return
-        now = datetime.now(timezone('Asia/Seoul'))
-        footer = get_embed_footer(message.author, now)
-        hour = now.hour
-        exp_gained = 200 if hour < 9 else 100
-        level, exp_after = await add_exp_and_check_level(message.author, exp_gained)
-        leveldata = LEVELS[level]
-        photo_url = message.attachments[0].url
-        try: await message.delete()
-        except Exception: pass
-        embed = discord.Embed(title=f"{leveldata['emoji']} 기상 인증 완료!", description=(f"{message.author.mention} 공듀님, 기상 인증 완료! 오늘 하루 멋지게 시작해요 🌞 (+{exp_gained} Exp)"), color=message.author.color)
-        embed.set_image(url=photo_url)
-        embed.add_field(name="🎁 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}")
-        embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
-        await req_msg.edit(embed=embed)
-
 @bot.command(name="통계")
 async def show_stats(ctx):
     user_id = str(ctx.author.id)
@@ -525,7 +491,7 @@ async def show_records(ctx):
 async def command_list(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
     footer = get_embed_footer(ctx.author, now)
-    embed = discord.Embed(title="👑 공듀봇 명령어 모음", description="각 채널에서 명령어를 입력해보세요!\n아래 채널명 클릭 시 바로 이동됩니다.", color=ctx.author.color)
+    embed = discord.Embed(title="👑 공듀봇명령어 모음", description="각 채널에서 명령어를 입력해보세요!\n아래 채널명 클릭 시 바로 이동됩니다.", color=ctx.author.color)
     embed.add_field(name=f"🍀 출석 (`!출석`)", value=f"매일 <#{ATTENDANCE_CHANNEL_ID}> 채널에서 출석하고 경험치를 얻으세요.", inline=False)
     embed.add_field(name=f"🌅 기상 (`!기상`)", value=f"<#{WAKEUP_CHANNEL_ID}> 채널에서 기상 인증 사진을 올려주세요.", inline=False)
     embed.add_field(name="📊 통계 (`!통계`)", value="나의 월간/주간/전체 통계를 한 번에 확인합니다.", inline=False)

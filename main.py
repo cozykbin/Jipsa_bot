@@ -4,28 +4,31 @@ from discord.ui import View, Button
 from discord import app_commands
 from datetime import datetime, timedelta
 from pytz import timezone
-import db # 수정: db 모듈 임포트 방식 변경
+import db 
 import random
 import os
-import aiohttp
+import ahttp
 import asyncio
 import logging
 
+# ... (상단 설정은 기존과 동일)
 TOKEN = os.getenv("DISCORD_TOKEN")
 GSHEET_WEBHOOK = os.getenv("GSHEET_WEBHOOK")
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.messages = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# [추가] 캠스터디 채널 이름 상수
+CAM_STUDY_CHANNEL = "🎥｜캠스터디"
+CAM_BONUS_MULTIPLIER = 2
+
+# ... (append_to_sheet, get_embed_footer, AttendanceRankingView, LEVELS 등 기존과 동일)
 async def append_to_sheet(session: aiohttp.ClientSession, sheet_name: str, data: list) -> bool:
-    # ... (기존과 동일)
     if not GSHEET_WEBHOOK:
         logger.error("Google Sheet Webhook URL이 설정되어 있지 않습니다.")
         return False
@@ -41,7 +44,6 @@ async def append_to_sheet(session: aiohttp.ClientSession, sheet_name: str, data:
         return False
 
 def get_embed_footer(user: discord.User, dt: datetime):
-    # ... (기존과 동일)
     kst = timezone('Asia/Seoul')
     now = dt.astimezone(kst)
     if now.date() == datetime.now(kst).date(): label = "오늘"
@@ -58,7 +60,6 @@ class AttendanceRankingView(View):
         self.add_item(Button(label="🔥 연속 출석 랭킹", style=discord.ButtonStyle.primary, custom_id="streak_rank"))
         self.add_item(Button(label="📅 누적 출석 랭킹", style=discord.ButtonStyle.secondary, custom_id="total_rank"))
 
-# ... (LEVELS, LEVEL_THRESHOLDS, get_level_from_exp, TRACKED_VOICE_CHANNELS 등은 기존과 동일)
 LEVELS = {
     1: {"emoji": "🪴", "name": "궁전문 앞 새싹", "desc": "드디어 궁전문을 똑똑 두드리는 우리 새싹 공듀🌱\n아직은 설렘과 긴장이 함께 찾아오지만,\n햇살이 좋은 날엔 ‘나도 뭔가 해낼 수 있을 것 같아’\n가만히 마음속 다짐이 싹 트기 시작해요."},
     2: {"emoji": "🏰", "name": "왕실 입문생", "desc": "한 걸음 더 내딛으면, 새로운 세계가 펼쳐져요!\n궁전 안에서 길을 잃기도 하고,\n간식 코너에서 몰래 쉬다 들키기도 하지만🐻‍❄️\n조금씩 나만의 리듬으로 살아가는 연습이 시작돼요.\n‘이게 바로 갓생의 첫걸음?’"},
@@ -73,27 +74,24 @@ LEVELS = {
 }
 LEVEL_THRESHOLDS = [0, 200, 600, 1500, 3000, 5000, 7500, 10000, 14000, 18500, 25000]
 TRACKED_VOICE_CHANNELS = ["🎥｜캠스터디", "📖｜1인실 (A)", "📖｜1인실 (B)", "📓｜도서관", "🌆｜워크스페이스"]
+RANKING_CHANNEL_ID = 1378863730741219458
+HONOR_CHANNEL_ID = 1378863861863682102
+MYINFO_CHANNEL_ID = 1378952514702938182
+ATTENDANCE_CHANNEL_ID = 1378862713484218489
+WAKEUP_CHANNEL_ID = 1378862771214745690
+ranking_message_id = None
+user_info_channel_msgs = {}
 
 def get_level_from_exp(exp):
     for i in range(1, len(LEVEL_THRESHOLDS)):
         if exp < LEVEL_THRESHOLDS[i]: return i
     return 10
 
-RANKING_CHANNEL_ID = 1378863730741219458
-HONOR_CHANNEL_ID = 1378863861863682102
-MYINFO_CHANNEL_ID = 1378952514702938182
-ATTENDANCE_CHANNEL_ID = 1378862713484218489
-WAKEUP_CHANNEL_ID = 1378862771214745690
-
-ranking_message_id = None
-user_info_channel_msgs = {} # 이 캐시는 유지 (DB 조회 최소화 목적)
-
-# [수정] 모든 DB 호출이 비동기로 변경됨에 따라 함수들을 async로 변경
 async def get_user_exp(user_id):
     return await db.get_exp(str(user_id))
 
+# ... (send_levelup_embed, create_or_update_user_info, add_exp_and_check_level 등 기존과 동일)
 async def send_levelup_embed(member, new_level):
-    # ... (기존과 동일, 내부 로직 변경 없음)
     honor_channel = bot.get_channel(HONOR_CHANNEL_ID)
     if honor_channel is None: return
     data = LEVELS[new_level]
@@ -111,8 +109,6 @@ async def create_or_update_user_info(member):
     exp = await get_user_exp(user_id)
     level = get_level_from_exp(exp)
     leveldata = LEVELS[level]
-
-    # ... (경험치 바 계산 로직 등은 기존과 동일)
     if level < len(LEVEL_THRESHOLDS) - 1: next_exp = LEVEL_THRESHOLDS[level]
     else: next_exp = exp + 100
     exp_required = next_exp - exp
@@ -128,7 +124,6 @@ async def create_or_update_user_info(member):
     progress_bar_length = 20
     filled_length = int(progress_bar_length * current_exp / progress_total) if progress_total else 0
     bar = "■" * filled_length + "□" * (progress_bar_length - filled_length)
-
     now = datetime.now(timezone('Asia/Seoul'))
     embed = discord.Embed(
         title=f"{member.display_name}님의 내정보",
@@ -138,28 +133,22 @@ async def create_or_update_user_info(member):
     embed.add_field(name="👑 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}", inline=False)
     embed.add_field(name="📊 총 경험치", value=f"{exp} Exp (다음 레벨까지 {exp_required} Exp 남음)", inline=False)
     embed.add_field(name="📈 진행도", value=f"`{bar}`", inline=False)
-
-    # [수정] 통계 조회도 비동기로 변경
     stats_month = await db.get_monthly_stats(user_id)
     embed.add_field(
         name="📅 이번달 통계",
         value=(f"출석: {stats_month['attendance']}일\n기상: {stats_month['wakeup']}일\n공부일수: {stats_month['study_days']}일\n공부시간: {stats_month['study_minutes']}분"),
         inline=True
     )
-
     stats_week = await db.get_weekly_stats(user_id)
     embed.add_field(
         name="📆 이번주 통계",
         value=(f"출석: {stats_week['attendance']}일\n기상: {stats_week['wakeup']}일\n공부일수: {stats_week['study_days']}일\n공부시간: {stats_week['study_minutes']}분"),
         inline=True
     )
-
     footer = get_embed_footer(member, now)
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
-
     channel = bot.get_channel(MYINFO_CHANNEL_ID)
     if channel is None: return
-
     if user_id in user_info_channel_msgs:
         try:
             msg_id = user_info_channel_msgs[user_id]
@@ -168,7 +157,6 @@ async def create_or_update_user_info(member):
             return
         except Exception:
             user_info_channel_msgs.pop(user_id, None)
-
     new_msg = await channel.send(embed=embed)
     user_info_channel_msgs[user_id] = new_msg.id
 
@@ -176,24 +164,21 @@ async def add_exp_and_check_level(member, exp_gained):
     user_id = str(member.id)
     exp_before = await get_user_exp(user_id)
     old_level = get_level_from_exp(exp_before)
-
     await db.add_exp(user_id, member.display_name, exp_gained)
     exp_after = exp_before + exp_gained
     new_level = get_level_from_exp(exp_after)
-
     if new_level > old_level:
         await send_levelup_embed(member, new_level)
-
     async with aiohttp.ClientSession() as session:
         await append_to_sheet(session, "users", [user_id, member.display_name, exp_after, new_level])
-
     await create_or_update_user_info(member)
     return new_level, exp_after
 
+# ... (make_ranking_embed, update_ranking, on_ready, setup_ranking_message 등 기존과 동일)
 async def make_ranking_embed():
     now = datetime.now(timezone('Asia/Seoul'))
     today_str = now.strftime("%Y년 %m월 %d일 %H:%M 기준")
-    ranking = await db.get_top_users_by_exp() # [수정] 비동기 호출
+    ranking = await db.get_top_users_by_exp()
     embed = discord.Embed(title="🏆 경험치 랭킹 TOP 10", color=discord.Color.gold())
     if not ranking:
         embed.description = "아직 아무도 경험치를 쌓지 않았어요! 🌱"
@@ -210,15 +195,12 @@ async def make_ranking_embed():
 
 @tasks.loop(minutes=1)
 async def update_ranking():
-    # ... (이전 수정과 동일한 로직, 내부 embed 생성 함수가 비동기화됨)
     global ranking_message_id
     channel = bot.get_channel(RANKING_CHANNEL_ID)
     if channel is None: return
-
     if ranking_message_id is None:
         await setup_ranking_message()
         if ranking_message_id is None: return
-
     try:
         msg = await channel.fetch_message(ranking_message_id)
         embed = await make_ranking_embed()
@@ -230,7 +212,7 @@ async def update_ranking():
 
 @bot.event
 async def on_ready():
-    await db.initialize_database() # [추가] 봇 시작 시 DB 테이블 생성/확인
+    await db.initialize_database()
     bot.add_view(AttendanceRankingView())
     await bot.tree.sync()
     await setup_ranking_message()
@@ -238,7 +220,6 @@ async def on_ready():
     print(f"✅ {bot.user} 로그인 완료")
 
 async def setup_ranking_message():
-    # ... (기존과 동일, 내부 embed 생성 함수가 비동기화됨)
     global ranking_message_id
     channel = bot.get_channel(RANKING_CHANNEL_ID)
     if channel is None: return
@@ -252,19 +233,172 @@ async def setup_ranking_message():
         await msg.pin()
         ranking_message_id = msg.id
 
+# ====================================================================================
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# [신규] 캠스터디 10분 유예시간 체크 및 자동 강퇴 함수
+# ====================================================================================
+async def check_and_kick(member: discord.Member):
+    """10분(600초) 후에 멤버의 카메라 상태를 확인하고, 꺼져있으면 강퇴시키는 함수"""
+    await asyncio.sleep(600)
+
+    user_id = str(member.id)
+    
+    # 10분 후, 멤버가 서버에 없거나 다른 채널로 이동했다면 함수 종료
+    if not member.guild or not member.voice or member.voice.channel.name != CAM_STUDY_CHANNEL:
+        return
+
+    # 10분 후, DB에서 세션 정보를 가져옴
+    session = await db.get_study_session(user_id)
+    
+    # 세션이 없거나(이미 퇴장 처리됨) 배율이 1이 아니면(이미 캠을 켬) 함수 종료
+    if not session or session.get('multiplier', 1) != 1:
+        return
+
+    # 위의 모든 조건을 통과했다면 -> 10분 동안 캠을 켜지 않은 유저
+    try:
+        study_channel = discord.utils.get(member.guild.text_channels, name="📕｜공부기록")
+        if study_channel:
+            msg = await study_channel.fetch_message(session['msg_id'])
+            embed = msg.embeds[0]
+            embed.title = "🚫 캠스터디 규칙 위반"
+            embed.description = f"{member.mention} 공듀님, 10분 내에 카메라를 켜지 않아 채널에서 이동되었어요."
+            embed.color = discord.Color.red()
+            await msg.edit(embed=embed)
+
+        await member.move_to(None, reason="캠스터디 10분 내 카메라 미사용")
+    except Exception as e:
+        logger.error(f"{member.display_name}님 강퇴 처리 중 오류: {e}")
+    finally:
+        # 강퇴 후에는 공부 세션 기록을 완전히 삭제 (경험치 지급 방지)
+        await db.delete_study_session(user_id)
+
+# ====================================================================================
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# [수정] on_voice_state_update: 캠스터디 채널 관련 로직 대폭 수정
+# ====================================================================================
+@bot.event
+async def on_voice_state_update(member, before, after):
+    now_kst = datetime.now(timezone('Asia/Seoul'))
+    user_id = str(member.id)
+    
+    study_channel = discord.utils.get(member.guild.text_channels, name="📕｜공부기록")
+    if study_channel is None: return
+
+    # 채널 상태 정의
+    before_channel_name = before.channel.name if before.channel else None
+    after_channel_name = after.channel.name if after.channel else None
+    is_before_study = before_channel_name in TRACKED_VOICE_CHANNELS
+    is_after_study = after_channel_name in TRACKED_VOICE_CHANNELS
+
+    # --- 시나리오 1: 공부 시작 (스터디 채널 입장) ---
+    if is_after_study and not is_before_study:
+        footer = get_embed_footer(member, now_kst)
+        
+        # 캠스터디 채널에 입장한 경우
+        if after_channel_name == CAM_STUDY_CHANNEL:
+            embed = discord.Embed(title="📸 캠스터디 입장!", color=member.color)
+            embed.description = (
+                f"{member.mention} 공듀님, 캠스터디에 오신 것을 환영해요!\n\n"
+                f"**10분 내에 카메라나 화면 공유를 켜주세요.**\n"
+                f"규칙을 지키지 않으면 자동으로 채널에서 내보내져요! 😥"
+            )
+            embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
+            msg = await study_channel.send(embed=embed)
+            await db.start_study_session(user_id, now_kst, msg.id)
+            # 10분 타이머 시작
+            bot.loop.create_task(check_and_kick(member))
+        
+        # 일반 스터디 채널에 입장한 경우
+        else:
+            embed = discord.Embed(title="🎀 공듀 스터디룸 입장 🎀", color=member.color)
+            embed.description = (
+                f"{member.mention} 공듀님이 도서관에 나타났어요!\n"
+                f"오늘도 집중모드 발동✨\n공부 시작 시간: {now_kst.strftime('%H:%M:%S')}"
+            )
+            embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
+            msg = await study_channel.send(embed=embed)
+            await db.start_study_session(user_id, now_kst, msg.id)
+
+    # --- 시나리오 2: 공부 종료 (스터디 채널 퇴장) ---
+    elif is_before_study and not is_after_study:
+        session = await db.end_study_session(user_id)
+        if not session: return
+
+        end_time = now_kst
+        duration_minutes = (end_time - session['start']).total_seconds() / 60
+        
+        try: msg = await study_channel.fetch_message(session['msg_id'])
+        except Exception: msg = None
+
+        if duration_minutes < 10:
+            embed = discord.Embed(title="⏰ 집중 실패! (10분 미만)", description=f"{member.mention} 공듀님, 10분 미만은 집중 인정 불가에요!", color=member.color)
+            embed.set_footer(text=get_embed_footer(member, end_time)["text"], icon_url=get_embed_footer(member, end_time)["icon_url"])
+            if msg: await msg.edit(embed=embed)
+            return
+
+        duration_int = int(duration_minutes)
+        # [수정] 경험치 계산 시 배율 적용
+        multiplier = session.get('multiplier', 1)
+        exp_gained = duration_int * multiplier
+
+        await db.log_study_time(user_id, member.display_name, duration_int)
+        level, exp_after = await add_exp_and_check_level(member, exp_gained)
+        leveldata = LEVELS[level]
+        today_total = await db.get_today_study_time(user_id)
+        h, m = divmod(duration_int, 60)
+        time_str = f"{h}시간 {m}분" if h else f"{m}분"
+
+        embed = discord.Embed(title=f"{leveldata['emoji']} 집중 완료! 공듀 퇴장 ✨", description=f"{member.mention} 공듀님 오늘도 대단해요!\n공부박스 도착🎁", color=member.color)
+        embed.add_field(name="⏳ 공부한 시간", value=f"**{time_str}**", inline=False)
+        embed.add_field(name="🌹 획득 Exp", value=f"**{exp_gained} Exp**{' (🔥 2배 보너스!)' if multiplier > 1 else ''}", inline=True)
+        embed.add_field(name="👑 오늘 누적", value=f"**{today_total}분**", inline=True)
+        embed.add_field(name="🏅 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}", inline=False)
+        embed.set_footer(text=get_embed_footer(member, end_time)["text"], icon_url=get_embed_footer(member, end_time)["icon_url"])
+
+        if msg: await msg.edit(embed=embed)
+        else: await study_channel.send(embed=embed)
+
+    # --- 시나리오 3: 채널 내 상태 변경 (카메라 On/Off 등) ---
+    elif is_after_study and after_channel_name == CAM_STUDY_CHANNEL:
+        session = await db.get_study_session(user_id)
+        if not session: return
+
+        is_cam_on = after.self_video or after.self_stream
+        current_multiplier = session.get('multiplier', 1)
+        
+        try:
+            msg = await study_channel.fetch_message(session['msg_id'])
+            embed = msg.embeds[0]
+
+            # 카메라/방송을 켰고, 현재 보너스를 받고 있지 않다면 -> 보너스 적용
+            if is_cam_on and current_multiplier == 1:
+                await db.update_study_multiplier(user_id, CAM_BONUS_MULTIPLIER)
+                embed.title = "열공 모드 ON 🔥"
+                embed.description = f"{member.mention} 공듀님, 집중하는 모습이 멋져요!\n**지금부터 경험치가 2배로 적용됩니다!**"
+                embed.color = discord.Color.green()
+                await msg.edit(embed=embed)
+
+            # 카메라/방송을 껐고, 현재 보너스를 받고 있다면 -> 보너스 해제
+            elif not is_cam_on and current_multiplier > 1:
+                await db.update_study_multiplier(user_id, 1)
+                embed.title = "📸 캠스터디 (일반 모드)"
+                embed.description = f"{member.mention} 공듀님, 휴식이 필요하신가요?\n카메라나 화면 공유를 다시 켜면 경험치 2배가 적용돼요!"
+                embed.color = member.color
+                await msg.edit(embed=embed)
+
+        except Exception as e:
+            logger.error(f"캠스터디 상태 업데이트 중 오류: {e}")
+
+# ... (이하 !출석, !기상, !통계, !기록, !명령어, 슬래시 커맨드 등 기존 코드와 동일)
 @bot.command(name="출석")
 async def checkin(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
-    # [수정] 모든 DB 호출을 비동기(await)로 변경
     saved_db = await db.save_attendance(str(ctx.author.id), ctx.author.display_name)
-    
     async with aiohttp.ClientSession() as session:
         await append_to_sheet(session, "attendance", [str(ctx.author.id), now.strftime("%Y-%m-%d"), ctx.author.display_name])
-
     streak = await db.get_streak_attendance(str(ctx.author.id))
     attendance_rows = await db.get_attendance(str(ctx.author.id))
     total = len(attendance_rows) if attendance_rows else 0
-
     embed = discord.Embed(color=ctx.author.color)
     if not saved_db:
         embed.title = "👑 출석 실패"
@@ -278,7 +412,6 @@ async def checkin(ctx):
                            f"❤️‍🔥 **현재 연속 출석**\n**{streak}일**\n\n"
                            f"📅 **총 출석 횟수**\n**{total}회**")
         embed.add_field(name="🎁 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}", inline=False)
-
     footer = get_embed_footer(ctx.author, now)
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     await ctx.send(embed=embed, view=AttendanceRankingView())
@@ -287,8 +420,6 @@ async def checkin(ctx):
 async def on_interaction(interaction: discord.Interaction):
     if not interaction.data or "custom_id" not in interaction.data: return
     custom_id = interaction.data.get("custom_id")
-    
-    # [수정] DB 추상화 함수를 사용하여 랭킹 조회
     if custom_id == "streak_rank":
         top_users = await db.get_streak_rankings()
         description = ""
@@ -296,7 +427,6 @@ async def on_interaction(interaction: discord.Interaction):
             description += f"{i}위 🔥 **{user_data['nickname']}** — {user_data['streak']}일\n"
         embed = discord.Embed(title="🔥 연속 출석 랭킹 TOP 10", description=description or "출석 기록이 없습니다.", color=discord.Color.orange())
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
     elif custom_id == "total_rank":
         top_users = await db.get_total_attendance_rankings()
         description = ""
@@ -309,41 +439,31 @@ async def on_interaction(interaction: discord.Interaction):
 async def wakeup(ctx):
     now = datetime.now(timezone('Asia/Seoul'))
     user_id = str(ctx.author.id)
-    
-    # [수정] DB 호출 비동기화
     is_first_wakeup = await db.save_wakeup(user_id, ctx.author.display_name) 
     footer = get_embed_footer(ctx.author, now)
-
     if not is_first_wakeup:
         embed = discord.Embed(title="☀️ 기상 실패", description=f"{ctx.author.mention} 공듀님, 오늘은 이미 기상 인증했어요! ☀️", color=ctx.author.color)
         embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
         await ctx.send(embed=embed)
         return
-
     async with aiohttp.ClientSession() as session:
         await append_to_sheet(session, "wakeup", [user_id, now.strftime("%Y-%m-%d"), ctx.author.display_name])
-
     embed = discord.Embed(title="📷 기상 인증 요청", description=(f"{ctx.author.mention} 공듀님, 기상 인증 사진을 올려주세요!\n카메라로 아침 인증샷(책상, 시계 등) 첨부 필수 📸"), color=ctx.author.color)
     embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
     msg = await ctx.send(embed=embed)
-    
-    # [수정] 휘발성 상태를 DB에 저장
     await db.add_wakeup_pending(user_id, msg.id)
 
 @bot.event
 async def on_message(message):
     if message.author.bot: return
     await bot.process_commands(message)
-
     user_id = str(message.author.id)
-    # [수정] 휘발성 상태를 DB에서 조회
     pending_msg_id = await db.get_and_remove_wakeup_pending(user_id)
     if pending_msg_id and message.attachments:
         try:
             req_msg = await message.channel.fetch_message(pending_msg_id)
         except Exception:
             return
-
         now = datetime.now(timezone('Asia/Seoul'))
         footer = get_embed_footer(message.author, now)
         hour = now.hour
@@ -351,101 +471,28 @@ async def on_message(message):
         level, exp_after = await add_exp_and_check_level(message.author, exp_gained)
         leveldata = LEVELS[level]
         photo_url = message.attachments[0].url
-
         try: await message.delete()
         except Exception: pass
-
         embed = discord.Embed(title=f"{leveldata['emoji']} 기상 인증 완료!", description=(f"{message.author.mention} 공듀님, 기상 인증 완료! 오늘 하루 멋지게 시작해요 🌞 (+{exp_gained} Exp)"), color=message.author.color)
         embed.set_image(url=photo_url)
         embed.add_field(name="🎁 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}")
         embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
         await req_msg.edit(embed=embed)
 
-@bot.event
-async def on_voice_state_update(member, before, after):
-    now_kst = datetime.now(timezone('Asia/Seoul'))
-    user_id = str(member.id)
-    
-    is_before_study = before.channel and before.channel.name in TRACKED_VOICE_CHANNELS
-    is_after_study = after.channel and after.channel.name in TRACKED_VOICE_CHANNELS
-
-    study_channel = discord.utils.get(member.guild.text_channels, name="📕｜공부기록")
-    if study_channel is None: return
-
-    # 공부 시작
-    if is_after_study and not is_before_study:
-        footer = get_embed_footer(member, now_kst)
-        embed = discord.Embed(title="🎀 공듀 스터디룸 입장 🎀", description=(f"{member.mention} 공듀님이 도서관에 나타났어요!\n오늘도 집중모드 발동✨\n공부 시작 시간: {now_kst.strftime('%H:%M:%S')}"), color=member.color)
-        embed.set_footer(text=footer["text"], icon_url=footer["icon_url"])
-        msg = await study_channel.send(embed=embed)
-        # [수정] 휘발성 상태를 DB에 저장
-        await db.start_study_session(user_id, now_kst, msg.id)
-
-    # 공부 종료
-    if is_before_study and not is_after_study:
-        # [수정] 휘발성 상태를 DB에서 조회 및 삭제
-        session = await db.end_study_session(user_id)
-        if not session: return
-
-        end_time = now_kst
-        footer_end = get_embed_footer(member, end_time)
-        duration_minutes = (end_time - session['start']).total_seconds() / 60
-        
-        try: msg = await study_channel.fetch_message(session['msg_id'])
-        except Exception: msg = None
-
-        if duration_minutes < 10:
-            embed = discord.Embed(title="⏰ 집중 실패! (10분 미만)", description=(f"{member.mention} 공듀님, 10분 미만은 집중 인정 불가에요!\n다시 도전해볼까요?"), color=member.color)
-            embed.set_footer(text=footer_end["text"], icon_url=footer_end["icon_url"])
-            if msg: await msg.edit(embed=embed)
-            else: await study_channel.send(embed=embed)
-            return
-
-        duration_int = int(duration_minutes)
-        await db.log_study_time(user_id, member.display_name, duration_int)
-        exp_gained = duration_int
-
-        async with aiohttp.ClientSession() as session_http:
-            await append_to_sheet(session_http, "study", [user_id, member.display_name, end_time.strftime("%Y-%m-%d"), duration_int])
-
-        level, exp_after = await add_exp_and_check_level(member, exp_gained)
-        leveldata = LEVELS[level]
-        today_total = await db.get_today_study_time(user_id)
-
-        h, m = divmod(duration_int, 60)
-        time_str = f"{h}시간 {m}분" if h else f"{m}분"
-
-        embed = discord.Embed(title=f"{leveldata['emoji']} 집중 완료! 공듀 퇴장 ✨", description=(f"{member.mention} 공듀님 오늘도 대단해요!\n공부박스 도착🎁"), color=member.color)
-        embed.add_field(name="⏳ 공부한 시간", value=f"**{time_str}**", inline=False)
-        embed.add_field(name="🌹 획득 Exp", value=f"**{exp_gained} Exp**", inline=True)
-        embed.add_field(name="👑 오늘 누적", value=f"**{today_total}분**", inline=True)
-        embed.add_field(name="🏅 현재 레벨", value=f"{leveldata['emoji']} Lv.{level} {leveldata['name']}", inline=False)
-        embed.set_footer(text=footer_end["text"], icon_url=footer_end["icon_url"])
-
-        if msg: await msg.edit(embed=embed)
-        else: await study_channel.send(embed=embed)
-
-# ... (이하 !통계, !기록, !명령어, !내정보 및 슬래시 커맨드들은 내부 DB 호출만 await로 변경)
-
 @bot.command(name="통계")
 async def show_stats(ctx):
     user_id = str(ctx.author.id)
     now = datetime.now(timezone('Asia/Seoul'))
     footer = get_embed_footer(ctx.author, now)
-
     exp = await get_user_exp(user_id)
     level = get_level_from_exp(exp)
     leveldata = LEVELS[level]
-    
     stats_month = await db.get_monthly_stats(user_id)
     stats_week = await db.get_weekly_stats(user_id)
-
-    # 전체 통계는 별도 함수 없이 직접 쿼리 (기존 방식 유지하되 비동기화)
     total_attendance = len(await db.get_attendance(user_id))
     total_wakeup = (await db.db_execute(f"SELECT COUNT(*) FROM wakeup WHERE user_id = {db.placeholder}", (user_id,), fetch="one"))[0]
     total_study_days = (await db.db_execute(f"SELECT COUNT(DISTINCT date) FROM study WHERE user_id = {db.placeholder} AND minutes >= 10", (user_id,), fetch="one"))[0]
     total_study_minutes = (await db.db_execute(f"SELECT COALESCE(SUM(minutes), 0) FROM study WHERE user_id = {db.placeholder}", (user_id,), fetch="one"))[0]
-
     embed = discord.Embed(title=f"{ctx.author.display_name}님의 통계 정보", color=ctx.author.color)
     embed.add_field(name="👑 레벨·경험치", value=f"{leveldata['emoji']} Lv.{level} ({exp} Exp)", inline=False)
     embed.add_field(name="📅 이번달 통계", value=(f"출석: {stats_month['attendance']}일\n기상: {stats_month['wakeup']}일\n공부일수: {stats_month['study_days']}일\n공부시간: {stats_month['study_minutes']}분"), inline=True)
@@ -459,19 +506,15 @@ async def show_records(ctx):
     user_id = str(ctx.author.id)
     now = datetime.now(timezone('Asia/Seoul'))
     footer = get_embed_footer(ctx.author, now)
-
     exp = await get_user_exp(user_id)
     level = get_level_from_exp(exp)
     leveldata = LEVELS[level]
-
     rows = await db.get_attendance(user_id)
     attendance_list = "\n".join(f"✅ {row[0]}" for row in rows[:20]) if rows else "아직 출석 기록이 없습니다."
     if len(rows) > 20: attendance_list += "\n… (이하 생략)"
-
     streak_att = await db.get_streak_attendance(user_id)
     streak_wup = await db.get_streak_wakeup(user_id)
     streak_std = await db.get_streak_study(user_id)
-
     embed = discord.Embed(title=f"{ctx.author.display_name}님의 기록 정보", color=ctx.author.color)
     embed.add_field(name="🔥 연속 기록", value=(f"연속 출석: {streak_att}일\n연속 기상: {streak_wup}일\n연속 공부: {streak_std}일"), inline=False)
     embed.add_field(name="🗓️ 출석 날짜 (최근 20개)", value=attendance_list, inline=False)
@@ -480,7 +523,6 @@ async def show_records(ctx):
 
 @bot.command(name="명령어")
 async def command_list(ctx):
-    # ... (기존과 동일)
     now = datetime.now(timezone('Asia/Seoul'))
     footer = get_embed_footer(ctx.author, now)
     embed = discord.Embed(title="👑 공듀봇 명령어 모음", description="각 채널에서 명령어를 입력해보세요!\n아래 채널명 클릭 시 바로 이동됩니다.", color=ctx.author.color)
